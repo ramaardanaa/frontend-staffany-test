@@ -6,15 +6,13 @@ import Card from "@material-ui/core/Card";
 import CardContent from "@material-ui/core/CardContent";
 import { makeStyles } from "@material-ui/core/styles";
 import { getErrorMessage } from "../helper/error/index";
-import { deleteShiftById, getShifts } from "../helper/api/shift";
+import { deleteShiftById, getShifts, publishShift } from "../helper/api/shift";
 import DataTable from "react-data-table-component";
 import IconButton from "@material-ui/core/IconButton";
 import DeleteIcon from "@material-ui/icons/Delete";
 import EditIcon from "@material-ui/icons/Edit";
 import ArrowBack from "@material-ui/icons/ArrowBackIosOutlined";
 import ArrowForward from "@material-ui/icons/ArrowForwardIosOutlined";
-import Fab from "@material-ui/core/Fab";
-import AddIcon from "@material-ui/icons/Add";
 import { useHistory } from "react-router-dom";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Alert from "@material-ui/lab/Alert";
@@ -39,6 +37,9 @@ const useStyles = makeStyles((theme) => ({
   publishButton: {
     backgroundColor: theme.color.turqouise,
     color: 'white'
+  },
+  arrow: {
+    margin: '0px 20px'
   }
 }));
 
@@ -68,54 +69,74 @@ const ActionButton: FunctionComponent<ActionButtonProps> = ({
 };
 
 interface WeeklyShiftButtonProps {
-  date: Date;
-  // onDelete: () => void;
+  weekId: Date;
+  setWeekId: (weekId: Date) => void;
 }
 
-const WeeklyShiftButton: FunctionComponent<WeeklyShiftButtonProps> = ({ date }) => {
-  return (
-    <div>
-      <IconButton size="small" aria-label="back">
-        <ArrowBack fontSize="small" />
-      </IconButton>
-      <span>{moment(date).format("MMM D")} - {moment(date).add(6, 'days').format("MMM D")}</span>
-      <IconButton size="small" aria-label="back">
-        <ArrowForward fontSize="small" />
-      </IconButton>
-    </div>
-  )
+const findWeeklyShift = (date: Date) => {
+  const firstDayOfWeek = moment.utc(date).day(1).subtract(1, 'days').toDate()
+  const lastDayOfWeek = moment.utc(firstDayOfWeek).add(6, 'days').toDate()
+
+  return [firstDayOfWeek, lastDayOfWeek]
 }
 
-const ActionToolbar = () => {
+const WeeklyShiftButton: FunctionComponent<WeeklyShiftButtonProps> = ({ weekId, setWeekId }) => {
   const classes = useStyles()
+  const [firstDayOfWeek, lastDayOfWeek] = findWeeklyShift(weekId)
+  const handleArrowBack = () => {
+    const newWeek = moment(weekId).subtract(7, 'days').toDate()
+    setWeekId(newWeek)
+  }
+  const handleArrowForward = () => {
+    const newWeek = moment(weekId).add(7, 'days').toDate()
+    setWeekId(newWeek)
+  }
+
   return (
     <div>
-      <Button variant="outlined" className={classes.addButton}>
-        Add shift
-      </Button>
-      <Button variant="contained" className={classes.publishButton}>
-        Publish
-      </Button>
+      <IconButton size="small" className={classes.arrow} aria-label="back">
+        <ArrowBack onClick={handleArrowBack} fontSize="small" />
+      </IconButton>
+      <span>{moment(firstDayOfWeek).format("MMM D")} - {moment(lastDayOfWeek).format("MMM D")}</span>
+      <IconButton size="small" className={classes.arrow} aria-label="back">
+        <ArrowForward onClick={handleArrowForward} fontSize="small" />
+      </IconButton>
     </div>
   )
+}
+
+interface Shift {
+  name: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  isPublished: boolean
 }
 
 const Shift = () => {
   const classes = useStyles();
   const history = useHistory();
 
-  const [rows, setRows] = useState([]);
+  const [rows, setRows] = useState<Shift[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
   const [errMsg, setErrMsg] = useState("");
-  const [week, setWeek] = useState(moment().day(1).toDate())
+  const [weekId, setWeekId] = useState(moment().toDate())
+  const [limit, setLimit] = useState(10);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
+  const [showPublishConfirm, setShowPublishConfirm] = useState<boolean>(false);
   const [deleteLoading, setDeleteLoading] = useState<boolean>(false);
+  const [publishLoading, setPublishLoading] = useState<boolean>(false);
 
   const onDeleteClick = (id: string) => {
     setSelectedId(id);
     setShowDeleteConfirm(true);
+  };
+
+  const onPublishClick = () => {
+    setShowPublishConfirm(true);
   };
 
   const onCloseDeleteDialog = () => {
@@ -123,23 +144,47 @@ const Shift = () => {
     setShowDeleteConfirm(false);
   };
 
-  useEffect(() => {
-    const getData = async () => {
-      try {
-        setIsLoading(true);
-        setErrMsg("");
-        const { results } = await getShifts();
-        setRows(results);
-      } catch (error) {
-        const message = getErrorMessage(error);
-        setErrMsg(message);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const onClosePublishDialog = () => {
+    setShowPublishConfirm(false);
+  };
 
-    getData();
-  }, []);
+  const publishShiftByWeekId = async () => {
+    try {
+      setPublishLoading(true);
+      setErrMsg("");
+
+      await publishShift({ weekId })
+
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setErrMsg(message);
+    } finally {
+      const { results: {data, totalCount} } = await getShifts(weekId, 1, limit);
+      setRows(data);
+      setTotalCount(totalCount)
+      setPublishLoading(false);
+      onClosePublishDialog();
+    }
+  }
+
+  const getData = async (page: number) => {
+    try {
+      setIsLoading(true);
+      setErrMsg("");
+      const { results: { data, totalCount } } = await getShifts(weekId, page, limit);
+      setRows(data);
+      setTotalCount(totalCount)
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setErrMsg(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    getData(1);
+  }, [weekId]);
 
   const columns = [
     {
@@ -161,14 +206,20 @@ const Shift = () => {
       name: "End Time",
       selector: "endTime",
       sortable: true,
-    },
+    }
+  ];
+
+  const columnsWithActions = [
+    ...columns,
     {
       name: "Actions",
       cell: (row: any) => (
         <ActionButton id={row.id} onDelete={() => onDeleteClick(row.id)} />
       ),
-    },
-  ];
+    }
+  ]
+
+  const isShiftPublished = rows.find(row => row.isPublished === true)
 
   const deleteDataById = async () => {
     try {
@@ -196,6 +247,26 @@ const Shift = () => {
     }
   };
 
+  const handlePageChange = (page: number) => {
+    getData(page);
+  };
+
+  const handlePerRowsChange = async (limit: number, page: number) => {
+    try {
+      setIsLoading(true);
+      setErrMsg("");
+      const { results: [data, totalCount] } = await getShifts(weekId, page, limit);
+      setRows(data);
+      setTotalCount(totalCount)
+      setLimit(limit)
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setErrMsg(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <Grid container spacing={3}>
       <Grid item xs={12}>
@@ -212,26 +283,41 @@ const Shift = () => {
               justifyContent="space-between"
               alignItems="center"
             >
-              <WeeklyShiftButton date={week} />
-              <ActionToolbar />
+              <WeeklyShiftButton weekId={weekId} setWeekId={setWeekId} />
+              <div>
+                <Button
+                  variant="outlined"
+                  className={classes.addButton}
+                  disabled={!!isShiftPublished}
+                  onClick={() => history.push("/shift/add")}>
+                  Add shift
+                </Button>
+                <Button variant="contained" onClick={onPublishClick} disabled={!!isShiftPublished} className={classes.publishButton}>
+                  Publish
+                </Button>
+              </div>
             </Grid>
             <DataTable
-              columns={columns}
+              columns={isShiftPublished ? columns : columnsWithActions}
               data={rows}
               pagination
               progressPending={isLoading}
+              paginationServer
+              paginationTotalRows={totalCount}
+              onChangeRowsPerPage={handlePerRowsChange}
+              onChangePage={handlePageChange}
             />
           </CardContent>
         </Card>
       </Grid>
-      <Fab
-        size="medium"
-        aria-label="add"
-        className={classes.fab}
-        onClick={() => history.push("/shift/add")}
-      >
-        <AddIcon />
-      </Fab>
+      <ConfirmDialog
+        title="Publish Confirmation"
+        description={`Do you want to publish this data ?`}
+        onClose={onClosePublishDialog}
+        open={showPublishConfirm}
+        onYes={publishShiftByWeekId}
+        loading={publishLoading} />
+
       <ConfirmDialog
         title="Delete Confirmation"
         description={`Do you want to delete this data ?`}

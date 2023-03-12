@@ -1,8 +1,9 @@
 import { getAxiosInstance } from ".";
 
-export const getShifts = async () => {
+export const getShifts = async (weekId: Date, page: number, limit: number) => {
   const api = getAxiosInstance()
-  const { data } = await api.get("/shifts?order[date]=DESC&order[startTime]=ASC");
+  const skip = (page - 1) * limit
+  const { data } = await api.get(`/shifts?weekId=${weekId}&take=${limit}&skip=${skip}`);
   return data;
 };
 
@@ -27,5 +28,11 @@ export const updateShiftById = async (id: string, payload: any) => {
 export const deleteShiftById = async (id: string) => {
   const api = getAxiosInstance()
   const { data } = await api.delete(`/shifts/${id}`);
+  return data;
+};
+
+export const publishShift = async (payload: any) => {
+  const api = getAxiosInstance()
+  const { data } = await api.patch(`/shifts`, payload);
   return data;
 };
